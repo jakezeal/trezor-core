@@ -1,4 +1,4 @@
-from trezor import ui
+from trezor import ui, wire
 
 
 def cipher_key_value(msg, seckey: bytes) -> bytes:
@@ -26,18 +26,26 @@ def cipher_key_value(msg, seckey: bytes) -> bytes:
 
 async def layout_cipher_key_value(ctx, msg):
     from trezor.messages.CipheredKeyValue import CipheredKeyValue
+    from trezor.messages.FailureType import ActionCancelled
+    from trezor.ui.text import Text
+    from trezor.ui.container import Container
     from ..common import seed
+    from ..common.confirm import confirm
 
     if len(msg.value) % 16 > 0:
         raise ValueError('Value length must be a multiple of 16')
 
     ui.display.clear()
-    ui.display.text(10, 30, 'CipherKeyValue',
-                    ui.BOLD, ui.LIGHT_GREEN, ui.BG)
-    ui.display.text(10, 60, msg.key, ui.MONO, ui.FG, ui.BG)
+    title = 'Encrypt value' if msg.encrypt else 'Decrypt value'
+    content = Container(Text(title, ui.ICON_RESET, msg.key, break_lines=True))
 
-    node = await seed.derive_node(ctx, msg.address_n)
+    if msg.ask_on_decrypt and not msg.encrypt or msg.ask_on_encrypt and msg.encrypt:
+        result = await confirm(ctx, content)
+        if result:
+            node = await seed.derive_node(ctx, msg.address_n)
+            value = cipher_key_value(msg, node.private_key())
+            return CipheredKeyValue(value=value)
+        else:
+            raise wire.FailureError(ActionCancelled, 'CipherKeyValue cancelled')
 
-    value = cipher_key_value(msg, node.private_key())
 
-    return CipheredKeyValue(value=value)
